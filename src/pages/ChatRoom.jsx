@@ -427,6 +427,7 @@ export default function ChatRoom() {
       const stream = localStreamRef.current;
       const tracks = stream.getTracks();
       if (tracks.length === 0) return;
+      console.log(`[WebRTC] Got offer, stream has tracks:`, tracks.map(t => `${t.kind}:${t.readyState}`));
       try {
         const peer = new RTCPeerConnection({
           iceServers: [
@@ -440,9 +441,17 @@ export default function ChatRoom() {
         });
         peerRef.current = peer;
 
-        tracks.forEach(track => {
-          if (track.readyState === 'live') {
-            peer.addTrack(track, stream);
+        // Add audio FIRST, then video, so transceiver MIDs match admin's addTransceiver order
+        stream.getAudioTracks().forEach(t => {
+          if (t.readyState === 'live') {
+            peer.addTrack(t, stream);
+            console.log(`[WebRTC] Added audio track to PC`);
+          }
+        });
+        stream.getVideoTracks().forEach(t => {
+          if (t.readyState === 'live') {
+            peer.addTrack(t, stream);
+            console.log(`[WebRTC] Added video track to PC`);
           }
         });
 
@@ -453,15 +462,21 @@ export default function ChatRoom() {
         };
 
         peer.onconnectionstatechange = () => {
+          console.log(`[WebRTC] Connection state: ${peer.connectionState}`);
           if (peer.connectionState === 'failed') {
             stopLocalStream();
           }
+        };
+
+        peer.oniceconnectionstatechange = () => {
+          console.log(`[WebRTC] ICE state: ${peer.iceConnectionState}`);
         };
 
         await peer.setRemoteDescription(new RTCSessionDescription(offer));
         const answer = await peer.createAnswer();
         await peer.setLocalDescription(answer);
         socket.emit('webrtc-answer', { targetSocketId: fromSocketId, answer });
+        console.log(`[WebRTC] Answer sent to admin`);
       } catch (e) {
         console.error('WebRTC offer handling error', e);
       }
