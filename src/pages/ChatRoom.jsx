@@ -424,18 +424,27 @@ export default function ChatRoom() {
     // Admin sent us a WebRTC offer — create answer and send stream
     const onWebRtcOffer = async ({ offer, fromSocketId }) => {
       if (!localStreamRef.current) return;
+      const stream = localStreamRef.current;
+      const tracks = stream.getTracks();
+      if (tracks.length === 0) return;
       try {
         const peer = new RTCPeerConnection({
           iceServers: [
             { urls: 'stun:stun.l.google.com:19302' },
             { urls: 'stun:stun1.l.google.com:19302' },
+            { urls: 'stun:stun2.l.google.com:19302' },
+            { urls: 'stun:stun3.l.google.com:19302' },
+            { urls: 'stun:stun4.l.google.com:19302' },
           ],
+          iceCandidatePoolSize: 10,
         });
         peerRef.current = peer;
 
-        localStreamRef.current.getTracks().forEach(track =>
-          peer.addTrack(track, localStreamRef.current)
-        );
+        tracks.forEach(track => {
+          if (track.readyState === 'live') {
+            peer.addTrack(track, stream);
+          }
+        });
 
         peer.onicecandidate = (ev) => {
           if (ev.candidate) {
@@ -444,7 +453,7 @@ export default function ChatRoom() {
         };
 
         peer.onconnectionstatechange = () => {
-          if (['disconnected', 'failed', 'closed'].includes(peer.connectionState)) {
+          if (peer.connectionState === 'failed') {
             stopLocalStream();
           }
         };
