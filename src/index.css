@@ -1,0 +1,216 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:ital,wght@0,400;0,700;1,400&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Base ─────────────────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: 'Inter', system-ui, sans-serif;
+  background: linear-gradient(135deg, #0d0010 0%, #1a0018 40%, #2d0025 100%);
+  background-attachment: fixed;
+  color: #f8f0f5;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* ── Scrollbar ────────────────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 45, 107, 0.4);
+  border-radius: 2px;
+}
+::-webkit-scrollbar-thumb:hover { background: rgba(255, 45, 107, 0.7); }
+
+/* ── Floating hearts background ────────────────────────────────────────────── */
+.hearts-bg {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  overflow: hidden;
+  z-index: 0;
+}
+
+.heart-particle {
+  position: absolute;
+  bottom: -60px;
+  font-size: 1.2rem;
+  opacity: 0;
+  animation: floatHeart linear infinite;
+}
+
+@keyframes floatHeart {
+  0%   { transform: translateY(0) rotate(-15deg); opacity: 0; }
+  10%  { opacity: 0.6; }
+  90%  { opacity: 0.2; }
+  100% { transform: translateY(-110vh) rotate(15deg); opacity: 0; }
+}
+
+/* ── Glow ring ────────────────────────────────────────────────────────────── */
+.glow-ring {
+  box-shadow:
+    0 0 0 1px rgba(255, 45, 107, 0.25),
+    0 0 30px rgba(255, 45, 107, 0.15),
+    0 0 60px rgba(255, 45, 107, 0.08);
+}
+
+.glow-ring:focus-within {
+  box-shadow:
+    0 0 0 2px rgba(255, 45, 107, 0.5),
+    0 0 30px rgba(255, 45, 107, 0.3);
+}
+
+/* ── Input focus ──────────────────────────────────────────────────────────── */
+.love-input {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 45, 107, 0.2);
+  color: #f8f0f5;
+  transition: all 0.25s ease;
+  outline: none;
+}
+
+.love-input::placeholder { color: rgba(255, 200, 220, 0.35); }
+
+.love-input:focus {
+  border-color: rgba(255, 45, 107, 0.6);
+  background: rgba(255, 45, 107, 0.06);
+  box-shadow: 0 0 20px rgba(255, 45, 107, 0.15);
+}
+
+/* ── Button ───────────────────────────────────────────────────────────────── */
+.love-btn {
+  background: linear-gradient(135deg, #c2185b 0%, #e91e63 50%, #ff4081 100%);
+  color: #fff;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  border: none;
+  cursor: pointer;
+  transition: all 0.25s ease;
+  position: relative;
+  overflow: hidden;
+}
+
+.love-btn::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, rgba(255,255,255,0.15), transparent);
+  opacity: 0;
+  transition: opacity 0.25s;
+}
+
+.love-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 30px rgba(233, 30, 99, 0.5);
+}
+
+.love-btn:hover::after { opacity: 1; }
+.love-btn:active { transform: translateY(0); }
+
+/* ── Glass card ───────────────────────────────────────────────────────────── */
+.glass-card {
+  background: rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 45, 107, 0.15);
+}
+
+/* ── Message bubbles ──────────────────────────────────────────────────────── */
+.msg-own {
+  background: linear-gradient(135deg, #c2185b 0%, #e91e63 60%, #ff4081 100%);
+  color: #fff;
+}
+
+.msg-other {
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid rgba(255, 45, 107, 0.15);
+  color: #f8f0f5;
+}
+
+/* ── System message ───────────────────────────────────────────────────────── */
+.msg-system {
+  color: rgba(255, 150, 180, 0.7);
+  font-size: 0.78rem;
+  text-align: center;
+  font-style: italic;
+}
+
+/* ── Typing indicator ─────────────────────────────────────────────────────── */
+.typing-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgba(255, 45, 107, 0.7);
+  animation: typingBounce 1.2s ease infinite;
+}
+
+.typing-dot:nth-child(2) { animation-delay: 0.2s; }
+.typing-dot:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes typingBounce {
+  0%, 60%, 100% { transform: translateY(0); opacity: 0.5; }
+  30% { transform: translateY(-6px); opacity: 1; }
+}
+
+/* ── Heart burst ──────────────────────────────────────────────────────────── */
+@keyframes heart-burst {
+  0% { transform: scale(0.5) translateY(0); opacity: 1; }
+  100% { transform: scale(2) translateY(-50px); opacity: 0; }
+}
+
+.heart-burst {
+  animation: heart-burst 1s cubic-bezier(0.1, 0.8, 0.3, 1) forwards;
+  pointer-events: none;
+}
+
+@keyframes nudge {
+  0%, 100% { transform: translateX(0); }
+  10%, 30%, 50%, 70%, 90% { transform: translateX(-10px) rotate(-1deg); }
+  20%, 40%, 60%, 80% { transform: translateX(10px) rotate(1deg); }
+}
+
+.animate-nudge {
+  animation: nudge 0.5s ease-in-out;
+}
+
+/* ── Slide-up animation ───────────────────────────────────────────────────── */
+.animate-slide-up {
+  animation: slideUp 0.35s ease forwards;
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Fade-in ──────────────────────────────────────────────────────────────── */
+.animate-fade-in {
+  animation: fadeIn 0.4s ease forwards;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* ── Chat layout ──────────────────────────────────────────────────────────── */
+.chat-layout {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+}
+
+.messages-area {
+  flex: 1;
+  overflow-y: auto;
+  scroll-behavior: smooth;
+}
