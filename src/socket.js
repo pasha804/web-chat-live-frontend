@@ -1,6 +1,6 @@
 import { io } from 'socket.io-client';
 
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:4000';
+const BACKEND_URL = 'https://web-chat-live-backend-production.up.railway.app';
 
 const socket = io(BACKEND_URL, {
   autoConnect: false,

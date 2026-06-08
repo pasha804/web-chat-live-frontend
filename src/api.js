@@ -1,4 +1,4 @@
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || '';
+const BACKEND_URL = 'https://web-chat-live-backend-production.up.railway.app';
 
 export async function apiPost(path, body) {
   const res = await fetch(`${BACKEND_URL}${path}`, {
