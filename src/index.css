@@ -18,8 +18,13 @@ body {
   background: linear-gradient(135deg, #0d0010 0%, #1a0018 40%, #2d0025 100%);
   background-attachment: fixed;
   color: #f8f0f5;
-  min-height: 100vh;
-  overflow-x: hidden;
+  height: 100%;
+  overflow: hidden;
+}
+
+html {
+  height: 100%;
+  overflow: hidden;
 }
 
 /* ── Scrollbar ────────────────────────────────────────────────────────────── */
@@ -207,10 +212,14 @@ body {
   display: flex;
   flex-direction: column;
   height: 100dvh;
+  overscroll-behavior: none;
 }
 
 .messages-area {
   flex: 1;
   overflow-y: auto;
+  overflow-x: hidden;
   scroll-behavior: smooth;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
 }

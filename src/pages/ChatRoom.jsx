@@ -56,17 +56,57 @@ function AdminAccessRequest({ onAllow, onDeny }) {
   );
 }
 
-// ── CUSTOM AUDIO PLAYER ─────────────────────────────────────────────────────
+// ── WAVEFORM AUDIO PLAYER ──────────────────────────────────────────────────
 function AudioPlayer({ src, isOwn }) {
   const audioRef = useRef(null);
   const [playing, setPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [bars, setBars] = useState([]);
+  const barsRef = useRef(null);
+  const animationRef = useRef(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const ctx = new (window.AudioContext || window.webkitAudioContext)();
+        const res = await fetch(src);
+        const buf = await res.arrayBuffer();
+        const audioBuf = await ctx.decodeAudioData(buf);
+        if (cancelled) return;
+        const data = audioBuf.getChannelData(0);
+        const n = 40;
+        const step = Math.floor(data.length / n);
+        const heights = [];
+        for (let i = 0; i < n; i++) {
+          let sum = 0;
+          for (let j = 0; j < step; j++) sum += Math.abs(data[i * step + j] || 0);
+          heights.push(sum / step);
+        }
+        const max = Math.max(...heights) || 1;
+        setBars(heights.map(v => v / max));
+        setDuration(audioBuf.duration);
+        ctx.close();
+      } catch {}
+    })();
+    return () => { cancelled = true; };
+  }, [src]);
 
   const togglePlay = () => {
     const a = audioRef.current;
     if (!a) return;
-    playing ? a.pause() : a.play();
+    if (playing) {
+      a.pause();
+      cancelAnimationFrame(animationRef.current);
+    } else {
+      a.play();
+      const update = () => {
+        setCurrentTime(a.currentTime || 0);
+        animationRef.current = requestAnimationFrame(update);
+      };
+      animationRef.current = requestAnimationFrame(update);
+    }
     setPlaying(!playing);
   };
 
@@ -76,29 +116,27 @@ function AudioPlayer({ src, isOwn }) {
     return `${m}:${sec < 10 ? '0' : ''}${sec}`;
   };
 
-  const progress = duration ? (currentTime / duration) * 100 : 0;
-
-  const handleSeek = (e) => {
-    if (!audioRef.current || !duration) return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    const ratio = Math.min(Math.max((e.clientX - rect.left) / rect.width, 0), 1);
-    audioRef.current.currentTime = ratio * duration;
-    setCurrentTime(ratio * duration);
-  };
+  const progress = duration ? (currentTime / duration) : 0;
 
   return (
-    <div className="flex items-center gap-2 min-w-[180px] w-full max-w-[240px] py-1">
+    <div className="flex items-center gap-2 min-w-[180px] w-full max-w-[260px] py-1">
       <audio
         ref={audioRef}
         src={src}
-        preload="metadata"
-        onTimeUpdate={() => setCurrentTime(audioRef.current?.currentTime || 0)}
-        onLoadedMetadata={() => { const d = audioRef.current?.duration; if (d && isFinite(d)) setDuration(d); }}
-        onEnded={() => { setPlaying(false); setCurrentTime(0); }}
+        preload="auto"
+        onLoadedMetadata={() => {
+          const d = audioRef.current?.duration;
+          if (d && isFinite(d)) setDuration(d);
+        }}
+        onEnded={() => {
+          setPlaying(false);
+          setCurrentTime(0);
+          cancelAnimationFrame(animationRef.current);
+        }}
       />
       <button
         onClick={togglePlay}
-        className={`shrink-0 w-8 h-8 rounded-full flex items-center justify-center transition-colors
+        className={`shrink-0 w-8 h-8 rounded-full flex items-center justify-center transition-all active:scale-90
           ${isOwn ? 'bg-white/20 hover:bg-white/30' : 'bg-pink-glow/20 hover:bg-pink-glow/30'}`}
       >
         {playing
@@ -108,18 +146,50 @@ function AudioPlayer({ src, isOwn }) {
       </button>
       <div className="flex-1 flex flex-col gap-1 min-w-0">
         <div
-          className="relative h-1.5 rounded-full cursor-pointer overflow-hidden"
-          style={{ background: isOwn ? 'rgba(255,255,255,0.2)' : 'rgba(255,45,107,0.2)' }}
-          onClick={handleSeek}
+          ref={barsRef}
+          className="relative h-8 rounded-lg overflow-hidden cursor-pointer flex items-center gap-[2px] px-1"
+          onClick={(e) => {
+            if (!audioRef.current || !duration || !barsRef.current) return;
+            const rect = barsRef.current.getBoundingClientRect();
+            const ratio = Math.min(Math.max((e.clientX - rect.left) / rect.width, 0), 1);
+            audioRef.current.currentTime = ratio * duration;
+            setCurrentTime(ratio * duration);
+          }}
         >
-          <div
-            className="absolute inset-y-0 left-0 rounded-full transition-[width] duration-100"
-            style={{ width: `${progress}%`, background: isOwn ? 'rgba(255,255,255,0.85)' : '#ff2d6b' }}
-          />
+          {bars.length > 0 ? bars.map((h, i) => {
+            const isPlayed = i / bars.length <= progress;
+            return (
+              <div
+                key={i}
+                className="flex-1 rounded-full transition-all duration-75"
+                style={{
+                  height: `${Math.max(3, h * 28)}px`,
+                  background: isPlayed
+                    ? (isOwn ? 'linear-gradient(to top, rgba(255,255,255,0.9), rgba(255,255,255,0.5))' : 'linear-gradient(to top, #ff2d6b, #ff6b9d)')
+                    : (isOwn ? 'rgba(255,255,255,0.25)' : 'rgba(255,45,107,0.25)'),
+                }}
+              />
+            );
+          }) : (
+            <div className="flex-1 flex items-center justify-center">
+              <div className="flex gap-0.5">
+                {Array.from({ length: 20 }).map((_, i) => (
+                  <div key={i} className="w-[3px] rounded-full bg-current opacity-30" style={{
+                    height: `${4 + Math.sin(i * 0.8) * 8 + 4}px`,
+                  }} />
+                ))}
+              </div>
+            </div>
+          )}
         </div>
-        <span className={`text-[0.6rem] tabular-nums ${isOwn ? 'text-rose-100/60' : 'text-rose-300/60'}`}>
-          {fmt(playing || currentTime ? currentTime : duration)}
-        </span>
+        <div className="flex justify-between">
+          <span className={`text-[0.55rem] tabular-nums ${isOwn ? 'text-rose-100/50' : 'text-rose-300/50'}`}>
+            {fmt(playing || currentTime ? currentTime : duration)}
+          </span>
+          <span className={`text-[0.55rem] tabular-nums ${isOwn ? 'text-rose-100/40' : 'text-rose-300/40'}`}>
+            {fmt(duration)}
+          </span>
+        </div>
       </div>
     </div>
   );
