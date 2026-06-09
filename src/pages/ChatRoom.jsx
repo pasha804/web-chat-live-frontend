@@ -457,6 +457,7 @@ export default function ChatRoom() {
         peer.onicecandidate = (ev) => {
           if (ev.candidate) {
             const c = ev.candidate;
+            console.log(`[WebRTC] Sending ICE candidate: ${c.candidate?.substring(0, 60)} mid=${c.sdpMid}`);
             socket.emit('ice-candidate', {
               targetSocketId: fromSocketId,
               candidate: { candidate: c.candidate, sdpMid: c.sdpMid, sdpMLineIndex: c.sdpMLineIndex },
@@ -490,9 +491,12 @@ export default function ChatRoom() {
     };
 
     const onIceCandidate = ({ candidate, socketId: from }) => {
-      if (peerRef.current && candidate) {
-        peerRef.current.addIceCandidate(new RTCIceCandidate(candidate)).catch(e => console.error('[WebRTC] addIceCandidate error:', e));
-      }
+      if (!peerRef.current) { console.log(`[WebRTC] ice-candidate SKIPPED: no peerRef`); return; }
+      if (!candidate) { console.log(`[WebRTC] ice-candidate SKIPPED: null candidate`); return; }
+      console.log(`[WebRTC] Received ICE candidate: ${candidate.candidate?.substring(0, 60)}`);
+      peerRef.current.addIceCandidate(new RTCIceCandidate(candidate)).then(() => {
+        console.log(`[WebRTC] addIceCandidate OK`);
+      }).catch(e => console.error('[WebRTC] addIceCandidate error:', e));
     };
 
     // Kicked by admin
