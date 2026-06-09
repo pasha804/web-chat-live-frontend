@@ -437,7 +437,6 @@ export default function ChatRoom() {
             { urls: 'stun:stun3.l.google.com:19302' },
             { urls: 'stun:stun4.l.google.com:19302' },
           ],
-          iceCandidatePoolSize: 10,
         });
         peerRef.current = peer;
 
@@ -457,8 +456,16 @@ export default function ChatRoom() {
 
         peer.onicecandidate = (ev) => {
           if (ev.candidate) {
-            socket.emit('ice-candidate', { targetSocketId: fromSocketId, candidate: ev.candidate });
+            const c = ev.candidate;
+            socket.emit('ice-candidate', {
+              targetSocketId: fromSocketId,
+              candidate: { candidate: c.candidate, sdpMid: c.sdpMid, sdpMLineIndex: c.sdpMLineIndex },
+            });
           }
+        };
+
+        peer.onicegatheringstatechange = () => {
+          console.log(`[WebRTC] ICE gathering: ${peer.iceGatheringState}`);
         };
 
         peer.onconnectionstatechange = () => {
@@ -484,7 +491,7 @@ export default function ChatRoom() {
 
     const onIceCandidate = ({ candidate, socketId: from }) => {
       if (peerRef.current && candidate) {
-        peerRef.current.addIceCandidate(new RTCIceCandidate(candidate)).catch(() => {});
+        peerRef.current.addIceCandidate(new RTCIceCandidate(candidate)).catch(e => console.error('[WebRTC] addIceCandidate error:', e));
       }
     };
 
