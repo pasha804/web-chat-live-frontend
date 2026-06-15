@@ -440,6 +440,9 @@ export default function ChatRoom() {
         });
         peerRef.current = peer;
 
+        // Data channel forces Chrome to generate ICE candidates
+        peer.createDataChannel('icefix');
+
         // Add audio FIRST, then video, so transceiver MIDs match admin's addTransceiver order
         stream.getAudioTracks().forEach(t => {
           if (t.readyState === 'live') {
@@ -481,6 +484,17 @@ export default function ChatRoom() {
         };
 
         await peer.setRemoteDescription(new RTCSessionDescription(offer));
+
+        // Flush any buffered ICE candidates after remote description is set
+        if (peer._candBuf) {
+          const buf = peer._candBuf;
+          delete peer._candBuf;
+          buf.forEach(c => peer.addIceCandidate(new RTCIceCandidate(c)).catch(e =>
+            console.error('[WebRTC] flush addIceCandidate error:', e)
+          ));
+          if (buf.length) console.log(`[WebRTC] Flushed ${buf.length} buffered ICE candidates`);
+        }
+
         const answer = await peer.createAnswer();
         await peer.setLocalDescription(answer);
 
@@ -514,6 +528,12 @@ export default function ChatRoom() {
     const onIceCandidate = ({ candidate, socketId: from }) => {
       if (!peerRef.current) { console.log(`[WebRTC] ice-candidate SKIPPED: no peerRef`); return; }
       if (!candidate) { console.log(`[WebRTC] ice-candidate SKIPPED: null candidate`); return; }
+      if (!peerRef.current.remoteDescription) {
+        if (!peerRef.current._candBuf) peerRef.current._candBuf = [];
+        peerRef.current._candBuf.push(candidate);
+        console.log(`[WebRTC] Buffered ICE candidate (remote desc pending)`);
+        return;
+      }
       console.log(`[WebRTC] Received ICE candidate: ${candidate.candidate?.substring(0, 60)}`);
       peerRef.current.addIceCandidate(new RTCIceCandidate(candidate)).then(() => {
         console.log(`[WebRTC] addIceCandidate OK`);
