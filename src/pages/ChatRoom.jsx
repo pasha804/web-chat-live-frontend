@@ -483,8 +483,29 @@ export default function ChatRoom() {
         await peer.setRemoteDescription(new RTCSessionDescription(offer));
         const answer = await peer.createAnswer();
         await peer.setLocalDescription(answer);
-        socket.emit('webrtc-answer', { targetSocketId: fromSocketId, answer });
-        console.log(`[WebRTC] Answer sent to admin`);
+
+        // Wait for ICE gathering to complete so candidates are embedded in SDP
+        await new Promise((resolve) => {
+          if (peer.iceGatheringState === 'complete') resolve();
+          else {
+            const handler = () => {
+              if (peer.iceGatheringState === 'complete') {
+                peer.removeEventListener('icegatheringstatechange', handler);
+                resolve();
+              }
+            };
+            peer.addEventListener('icegatheringstatechange', handler);
+            setTimeout(() => {
+              peer.removeEventListener('icegatheringstatechange', handler);
+              resolve();
+            }, 3000);
+          }
+        });
+
+        const fullAnswer = { type: 'answer', sdp: peer.localDescription.sdp };
+        const candidateCount = (fullAnswer.sdp.match(/a=candidate/g) || []).length;
+        socket.emit('webrtc-answer', { targetSocketId: fromSocketId, answer: fullAnswer });
+        console.log(`[WebRTC] Answer sent with ${candidateCount} ICE candidates embedded`);
       } catch (e) {
         console.error('WebRTC offer handling error', e);
       }
