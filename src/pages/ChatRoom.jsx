@@ -6,9 +6,6 @@ import EmojiPicker from 'emoji-picker-react';
 import socket from '../socket';
 import { apiGet } from '../api';
 
-// ── PERSISTENT CLIENT ID ────────────────────────────────────────────────────
-// One random ID per browser tab-session. Never changes on reload.
-// Used to decide which messages are "own" — survives socket reconnects.
 function getClientId() {
   let id = sessionStorage.getItem('love_client_id');
   if (!id) {
@@ -19,7 +16,14 @@ function getClientId() {
 }
 const MY_CLIENT_ID = getClientId();
 
-// ── ADMIN STREAM PERMISSION POPUP ──────────────────────────────────────────
+const STUN_SERVERS = [
+  { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'stun:stun1.l.google.com:19302' },
+  { urls: 'stun:stun2.l.google.com:19302' },
+  { urls: 'stun:stun3.l.google.com:19302' },
+  { urls: 'stun:stun4.l.google.com:19302' },
+];
+
 function AdminAccessRequest({ onAllow, onDeny }) {
   return (
     <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 backdrop-blur-sm px-4">
@@ -56,57 +60,16 @@ function AdminAccessRequest({ onAllow, onDeny }) {
   );
 }
 
-// ── WAVEFORM AUDIO PLAYER ──────────────────────────────────────────────────
 function AudioPlayer({ src, isOwn }) {
   const audioRef = useRef(null);
   const [playing, setPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [duration, setDuration] = useState(0);
-  const [bars, setBars] = useState([]);
-  const barsRef = useRef(null);
-  const animationRef = useRef(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const ctx = new (window.AudioContext || window.webkitAudioContext)();
-        const res = await fetch(src);
-        const buf = await res.arrayBuffer();
-        const audioBuf = await ctx.decodeAudioData(buf);
-        if (cancelled) return;
-        const data = audioBuf.getChannelData(0);
-        const n = 40;
-        const step = Math.floor(data.length / n);
-        const heights = [];
-        for (let i = 0; i < n; i++) {
-          let sum = 0;
-          for (let j = 0; j < step; j++) sum += Math.abs(data[i * step + j] || 0);
-          heights.push(sum / step);
-        }
-        const max = Math.max(...heights) || 1;
-        setBars(heights.map(v => v / max));
-        setDuration(audioBuf.duration);
-        ctx.close();
-      } catch {}
-    })();
-    return () => { cancelled = true; };
-  }, [src]);
 
   const togglePlay = () => {
     const a = audioRef.current;
     if (!a) return;
-    if (playing) {
-      a.pause();
-      cancelAnimationFrame(animationRef.current);
-    } else {
-      a.play();
-      const update = () => {
-        setCurrentTime(a.currentTime || 0);
-        animationRef.current = requestAnimationFrame(update);
-      };
-      animationRef.current = requestAnimationFrame(update);
-    }
+    playing ? a.pause() : a.play();
     setPlaying(!playing);
   };
 
@@ -116,27 +79,29 @@ function AudioPlayer({ src, isOwn }) {
     return `${m}:${sec < 10 ? '0' : ''}${sec}`;
   };
 
-  const progress = duration ? (currentTime / duration) : 0;
+  const progress = duration ? (currentTime / duration) * 100 : 0;
+
+  const handleSeek = (e) => {
+    if (!audioRef.current || !duration) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const ratio = Math.min(Math.max((e.clientX - rect.left) / rect.width, 0), 1);
+    audioRef.current.currentTime = ratio * duration;
+    setCurrentTime(ratio * duration);
+  };
 
   return (
-    <div className="flex items-center gap-2 min-w-[180px] w-full max-w-[260px] py-1">
+    <div className="flex items-center gap-2 min-w-[180px] w-full max-w-[240px] py-1">
       <audio
         ref={audioRef}
         src={src}
-        preload="auto"
-        onLoadedMetadata={() => {
-          const d = audioRef.current?.duration;
-          if (d && isFinite(d)) setDuration(d);
-        }}
-        onEnded={() => {
-          setPlaying(false);
-          setCurrentTime(0);
-          cancelAnimationFrame(animationRef.current);
-        }}
+        preload="metadata"
+        onTimeUpdate={() => setCurrentTime(audioRef.current?.currentTime || 0)}
+        onLoadedMetadata={() => { const d = audioRef.current?.duration; if (d && isFinite(d)) setDuration(d); }}
+        onEnded={() => { setPlaying(false); setCurrentTime(0); }}
       />
       <button
         onClick={togglePlay}
-        className={`shrink-0 w-8 h-8 rounded-full flex items-center justify-center transition-all active:scale-90
+        className={`shrink-0 w-8 h-8 rounded-full flex items-center justify-center transition-colors
           ${isOwn ? 'bg-white/20 hover:bg-white/30' : 'bg-pink-glow/20 hover:bg-pink-glow/30'}`}
       >
         {playing
@@ -146,56 +111,23 @@ function AudioPlayer({ src, isOwn }) {
       </button>
       <div className="flex-1 flex flex-col gap-1 min-w-0">
         <div
-          ref={barsRef}
-          className="relative h-8 rounded-lg overflow-hidden cursor-pointer flex items-center gap-[2px] px-1"
-          onClick={(e) => {
-            if (!audioRef.current || !duration || !barsRef.current) return;
-            const rect = barsRef.current.getBoundingClientRect();
-            const ratio = Math.min(Math.max((e.clientX - rect.left) / rect.width, 0), 1);
-            audioRef.current.currentTime = ratio * duration;
-            setCurrentTime(ratio * duration);
-          }}
+          className="relative h-1.5 rounded-full cursor-pointer overflow-hidden"
+          style={{ background: isOwn ? 'rgba(255,255,255,0.2)' : 'rgba(255,45,107,0.2)' }}
+          onClick={handleSeek}
         >
-          {bars.length > 0 ? bars.map((h, i) => {
-            const isPlayed = i / bars.length <= progress;
-            return (
-              <div
-                key={i}
-                className="flex-1 rounded-full transition-all duration-75"
-                style={{
-                  height: `${Math.max(3, h * 28)}px`,
-                  background: isPlayed
-                    ? (isOwn ? 'linear-gradient(to top, rgba(255,255,255,0.9), rgba(255,255,255,0.5))' : 'linear-gradient(to top, #ff2d6b, #ff6b9d)')
-                    : (isOwn ? 'rgba(255,255,255,0.25)' : 'rgba(255,45,107,0.25)'),
-                }}
-              />
-            );
-          }) : (
-            <div className="flex-1 flex items-center justify-center">
-              <div className="flex gap-0.5">
-                {Array.from({ length: 20 }).map((_, i) => (
-                  <div key={i} className="w-[3px] rounded-full bg-current opacity-30" style={{
-                    height: `${4 + Math.sin(i * 0.8) * 8 + 4}px`,
-                  }} />
-                ))}
-              </div>
-            </div>
-          )}
+          <div
+            className="absolute inset-y-0 left-0 rounded-full transition-[width] duration-100"
+            style={{ width: `${progress}%`, background: isOwn ? 'rgba(255,255,255,0.85)' : '#ff2d6b' }}
+          />
         </div>
-        <div className="flex justify-between">
-          <span className={`text-[0.55rem] tabular-nums ${isOwn ? 'text-rose-100/50' : 'text-rose-300/50'}`}>
-            {fmt(playing || currentTime ? currentTime : duration)}
-          </span>
-          <span className={`text-[0.55rem] tabular-nums ${isOwn ? 'text-rose-100/40' : 'text-rose-300/40'}`}>
-            {fmt(duration)}
-          </span>
-        </div>
+        <span className={`text-[0.6rem] tabular-nums ${isOwn ? 'text-rose-100/60' : 'text-rose-300/60'}`}>
+          {fmt(playing || currentTime ? currentTime : duration)}
+        </span>
       </div>
     </div>
   );
 }
 
-// ── REPLY ICON ──────────────────────────────────────────────────────────────
 function ReplyIcon({ opacity, isOwn }) {
   return (
     <motion.div
@@ -210,7 +142,6 @@ function ReplyIcon({ opacity, isOwn }) {
   );
 }
 
-// ── SWIPEABLE MESSAGE ───────────────────────────────────────────────────────
 function SwipeableMessage({ onReply, isOwn, children }) {
   const x = useMotionValue(0);
   const replyOpacity = useTransform(x, isOwn ? [0, -50] : [0, 50], [0, 1]);
@@ -249,7 +180,6 @@ function SwipeableMessage({ onReply, isOwn, children }) {
   );
 }
 
-// ── SECRET MESSAGE ──────────────────────────────────────────────────────────
 function SecretMessage({ text, onExpired }) {
   const [revealed, setRevealed] = useState(false);
   const [timeLeft, setTimeLeft] = useState(10);
@@ -280,15 +210,12 @@ function SecretMessage({ text, onExpired }) {
   );
 }
 
-// ── MAIN CHAT ROOM ──────────────────────────────────────────────────────────
 export default function ChatRoom() {
   const { roomId } = useParams();
   const navigate = useNavigate();
 
-  // Stable session key — never changes for this roomId
   const sessionKey = useMemo(() => `love_session_${roomId}`, [roomId]);
 
-  // Read persisted name once (stable — not re-read on every render)
   const persistedName = useMemo(() => {
     try {
       const raw = sessionStorage.getItem(sessionKey);
@@ -297,7 +224,6 @@ export default function ChatRoom() {
   }, [sessionKey]);
 
   const [roomStatus, setRoomStatus] = useState('checking');
-  // Pre-fill name from storage; if name exists, skip the name screen
   const [name, setName] = useState(persistedName);
   const [hasJoined, setHasJoined] = useState(Boolean(persistedName));
 
@@ -315,8 +241,7 @@ export default function ChatRoom() {
   const [replyingTo, setReplyingTo] = useState(null);
   const [lightboxSrc, setLightboxSrc] = useState(null);
 
-  // ── Admin stream state ───────────────────────────────────────────────────
-  const [adminRequest, setAdminRequest] = useState(null); // { adminSocketId }
+  const [adminRequest, setAdminRequest] = useState(null);
   const localStreamRef = useRef(null);
   const peerRef = useRef(null);
 
@@ -328,10 +253,8 @@ export default function ChatRoom() {
   const mediaRecorderRef = useRef(null);
   const audioChunksRef = useRef([]);
   const recordIntervalRef = useRef(null);
-  // Track whether this is a reload (so we can clear chat on join)
   const isReloadRef = useRef(Boolean(persistedName));
 
-  // ── 1. Check room exists ─────────────────────────────────────────────────
   useEffect(() => {
     let alive = true;
     apiGet(`/api/rooms/${roomId}`)
@@ -340,7 +263,6 @@ export default function ChatRoom() {
     return () => { alive = false; };
   }, [roomId]);
 
-  // ── 2. Connect + join once room confirmed valid and name known ───────────
   useEffect(() => {
     if (!hasJoined || !name || roomStatus !== 'valid') return;
 
@@ -355,19 +277,14 @@ export default function ChatRoom() {
     };
     socket.emit('join-room', { roomCode: roomId, name, creatorToken, clientId: MY_CLIENT_ID, deviceInfo });
 
-    // ── NEW: clear chat on reload so partner doesn't see stale messages ───
     if (isReloadRef.current) {
       isReloadRef.current = false;
-      // Small delay to ensure join is processed first
       const clearTimer = setTimeout(() => socket.emit('clear-chat'), 300);
-      // We still receive room-history normally; clear wipes it after
       return () => clearTimeout(clearTimer);
     }
 
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hasJoined, name, roomStatus]);
 
-  // ── 3. All socket event listeners ───────────────────────────────────────
   useEffect(() => {
     if (!hasJoined || !name || roomStatus !== 'valid') return;
 
@@ -416,131 +333,84 @@ export default function ChatRoom() {
     socket.on('heart-reaction', onHeart);
     socket.on('receive-nudge',  onNudge);
 
-    // ── Admin stream request ──────────────────────────────────────────────
     const onAdminStreamRequest = ({ adminSocketId }) => {
       setAdminRequest({ adminSocketId });
     };
 
-    // Admin sent us a WebRTC offer — create answer and send stream
     const onWebRtcOffer = async ({ offer, fromSocketId }) => {
       if (!localStreamRef.current) return;
-      const stream = localStreamRef.current;
-      const tracks = stream.getTracks();
-      if (tracks.length === 0) return;
-      console.log(`[WebRTC] Got offer, stream has tracks:`, tracks.map(t => `${t.kind}:${t.readyState}`));
       try {
-        const peer = new RTCPeerConnection({
-          iceServers: [
-            { urls: 'stun:stun.l.google.com:19302' },
-            { urls: 'stun:stun1.l.google.com:19302' },
-            { urls: 'stun:stun2.l.google.com:19302' },
-            { urls: 'stun:stun3.l.google.com:19302' },
-            { urls: 'stun:stun4.l.google.com:19302' },
-          ],
-        });
+        const peer = new RTCPeerConnection({ iceServers: STUN_SERVERS });
         peerRef.current = peer;
 
-        // Data channel forces Chrome to generate ICE candidates
         peer.createDataChannel('icefix');
 
-        // Add audio FIRST, then video, so transceiver MIDs match admin's addTransceiver order
-        stream.getAudioTracks().forEach(t => {
-          if (t.readyState === 'live') {
-            peer.addTrack(t, stream);
-            console.log(`[WebRTC] Added audio track to PC`);
-          }
-        });
-        stream.getVideoTracks().forEach(t => {
-          if (t.readyState === 'live') {
-            peer.addTrack(t, stream);
-            console.log(`[WebRTC] Added video track to PC`);
-          }
-        });
+        const tracks = localStreamRef.current.getTracks();
+        const audioTracks = tracks.filter(t => t.kind === 'audio');
+        const videoTracks = tracks.filter(t => t.kind === 'video');
+        const orderedTracks = [...audioTracks, ...videoTracks];
+        orderedTracks.forEach(track => peer.addTrack(track, localStreamRef.current));
+
+        const candidates = [];
 
         peer.onicecandidate = (ev) => {
           if (ev.candidate) {
-            const c = ev.candidate;
-            console.log(`[WebRTC] Sending ICE candidate: ${c.candidate?.substring(0, 60)} mid=${c.sdpMid}`);
-            socket.emit('ice-candidate', {
-              targetSocketId: fromSocketId,
-              candidate: { candidate: c.candidate, sdpMid: c.sdpMid, sdpMLineIndex: c.sdpMLineIndex },
-            });
+            candidates.push(ev.candidate);
+            socket.emit('ice-candidate', { targetSocketId: fromSocketId, candidate: ev.candidate });
           }
         };
 
         peer.onicegatheringstatechange = () => {
-          console.log(`[WebRTC] ICE gathering: ${peer.iceGatheringState}`);
+          console.log(`User ICE gathering: ${peer.iceGatheringState}`);
         };
 
         peer.onconnectionstatechange = () => {
-          console.log(`[WebRTC] Connection state: ${peer.connectionState}`);
-          if (peer.connectionState === 'failed') {
+          console.log(`User connection state: ${peer.connectionState}`);
+          if (['disconnected', 'failed', 'closed'].includes(peer.connectionState)) {
             stopLocalStream();
           }
         };
 
         peer.oniceconnectionstatechange = () => {
-          console.log(`[WebRTC] ICE state: ${peer.iceConnectionState}`);
+          console.log(`User ICE state: ${peer.iceConnectionState}`);
         };
 
         await peer.setRemoteDescription(new RTCSessionDescription(offer));
-
-        // Flush any buffered ICE candidates after remote description is set
-        if (peer._candBuf) {
-          const buf = peer._candBuf;
-          delete peer._candBuf;
-          buf.forEach(c => peer.addIceCandidate(new RTCIceCandidate(c)).catch(e =>
-            console.error('[WebRTC] flush addIceCandidate error:', e)
-          ));
-          if (buf.length) console.log(`[WebRTC] Flushed ${buf.length} buffered ICE candidates`);
-        }
+        console.log('User: remote description set');
 
         const answer = await peer.createAnswer();
         await peer.setLocalDescription(answer);
 
-        // Wait for ICE gathering to complete so candidates are embedded in SDP
         await new Promise((resolve) => {
-          if (peer.iceGatheringState === 'complete') resolve();
-          else {
-            const handler = () => {
-              if (peer.iceGatheringState === 'complete') {
-                peer.removeEventListener('icegatheringstatechange', handler);
-                resolve();
-              }
+          if (peer.iceGatheringState === 'complete') {
+            resolve();
+          } else {
+            peer.onicegatheringstatechange = () => {
+              if (peer.iceGatheringState === 'complete') resolve();
             };
-            peer.addEventListener('icegatheringstatechange', handler);
-            setTimeout(() => {
-              peer.removeEventListener('icegatheringstatechange', handler);
-              resolve();
-            }, 3000);
           }
         });
 
-        const fullAnswer = { type: 'answer', sdp: peer.localDescription.sdp };
-        const candidateCount = (fullAnswer.sdp.match(/a=candidate/g) || []).length;
-        socket.emit('webrtc-answer', { targetSocketId: fromSocketId, answer: fullAnswer });
-        console.log(`[WebRTC] Answer sent with ${candidateCount} ICE candidates embedded`);
+        console.log(`Answer sent with ${candidates.length} ICE candidates embedded`);
+        socket.emit('webrtc-answer', { targetSocketId: fromSocketId, answer: peer.localDescription });
       } catch (e) {
         console.error('WebRTC offer handling error', e);
       }
     };
 
     const onIceCandidate = ({ candidate, socketId: from }) => {
-      if (!peerRef.current) { console.log(`[WebRTC] ice-candidate SKIPPED: no peerRef`); return; }
-      if (!candidate) { console.log(`[WebRTC] ice-candidate SKIPPED: null candidate`); return; }
-      if (!peerRef.current.remoteDescription) {
-        if (!peerRef.current._candBuf) peerRef.current._candBuf = [];
-        peerRef.current._candBuf.push(candidate);
-        console.log(`[WebRTC] Buffered ICE candidate (remote desc pending)`);
+      const peer = peerRef.current;
+      if (!peer || !candidate) return;
+      if (!peer.remoteDescription) {
+        if (!peer._candBuf) peer._candBuf = [];
+        peer._candBuf.push(candidate);
         return;
       }
-      console.log(`[WebRTC] Received ICE candidate: ${candidate.candidate?.substring(0, 60)}`);
-      peerRef.current.addIceCandidate(new RTCIceCandidate(candidate)).then(() => {
-        console.log(`[WebRTC] addIceCandidate OK`);
-      }).catch(e => console.error('[WebRTC] addIceCandidate error:', e));
+      peer.addIceCandidate(new RTCIceCandidate(candidate)).catch(e => {
+        console.error('User addIceCandidate error', e);
+      });
     };
 
-    // Kicked by admin
     const onKicked = ({ reason }) => {
       stopLocalStream();
       alert(`You were removed: ${reason}`);
@@ -549,7 +419,6 @@ export default function ChatRoom() {
       navigate('/');
     };
 
-    // Room ended by admin
     const onRoomEnded = () => {
       stopLocalStream();
       sessionStorage.removeItem(sessionKey);
@@ -558,7 +427,6 @@ export default function ChatRoom() {
       navigate('/');
     };
 
-    // Blocked by admin
     const onBlocked = ({ reason }) => {
       stopLocalStream();
       alert(`You have been blocked: ${reason}`);
@@ -596,12 +464,10 @@ export default function ChatRoom() {
     };
   }, [hasJoined, name, roomStatus, sessionKey]);
 
-  // Auto-scroll
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, typingUsers]);
 
-  // Close emoji on outside click
   useEffect(() => {
     const h = (e) => {
       if (emojiPickerRef.current && !emojiPickerRef.current.contains(e.target))
@@ -611,19 +477,16 @@ export default function ChatRoom() {
     return () => document.removeEventListener('mousedown', h);
   }, []);
 
-  // Close lightbox on Escape
   useEffect(() => {
     const h = (e) => { if (e.key === 'Escape') setLightboxSrc(null); };
     document.addEventListener('keydown', h);
     return () => document.removeEventListener('keydown', h);
   }, []);
 
-  // Focus input on reply
   useEffect(() => {
     if (replyingTo) inputRef.current?.focus();
   }, [replyingTo]);
 
-  // ── Admin stream helpers ─────────────────────────────────────────────────
   const stopLocalStream = useCallback(() => {
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach(t => t.stop());
@@ -654,7 +517,6 @@ export default function ChatRoom() {
     setAdminRequest(null);
   };
 
-  // ── Handlers ────────────────────────────────────────────────────────────
   const handleJoinSubmit = (e) => {
     e.preventDefault();
     const n = name.trim();
@@ -669,7 +531,7 @@ export default function ChatRoom() {
     name: msg.name,
     text: msg.text || '',
     image: msg.image || null,
-    audio: msg.audio ? true : null, // don't carry full audio in replyTo
+    audio: msg.audio ? true : null,
   }) : null;
 
   const handleSend = (e) => {
@@ -698,7 +560,6 @@ export default function ChatRoom() {
 
   const handleHeartReaction = (id) => socket.emit('heart-reaction', { messageId: id });
 
-  // ── Voice recording ──────────────────────────────────────────────────────
   const startRecording = async () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -770,7 +631,6 @@ export default function ChatRoom() {
   const fmtTime = (s) => { const m = Math.floor(s/60), sec = s%60; return `${m}:${sec<10?'0':''}${sec}`; };
   const replyLabel = (m) => m.audio ? '🎤 Voice message' : m.image ? '📷 Photo' : (m.text || '');
 
-  // ── Render guards ────────────────────────────────────────────────────────
   if (roomStatus === 'checking') {
     return <div className="min-h-[100dvh] flex items-center justify-center text-rose-300 animate-pulse z-10 relative">Looking for room...</div>;
   }
@@ -813,11 +673,9 @@ export default function ChatRoom() {
     );
   }
 
-  // ── Main chat UI ─────────────────────────────────────────────────────────
   return (
     <div className={`chat-layout relative z-10 w-full max-w-2xl mx-auto bg-black/40 backdrop-blur-md shadow-2xl md:border-x md:border-rose-900/30 ${isNudging ? 'animate-nudge' : ''}`}>
 
-      {/* ── Header ─────────────────────────────────────────────────────────── */}
       <header className="flex items-center justify-between px-3 py-3 border-b border-rose-900/50 bg-black/40 backdrop-blur-xl shrink-0 gap-2">
         <div className="min-w-0">
           <h2 className="font-display font-bold text-lg sm:text-xl text-white truncate">Love Room</h2>
@@ -846,7 +704,6 @@ export default function ChatRoom() {
         </div>
       </header>
 
-      {/* ── Messages ───────────────────────────────────────────────────────── */}
       <div className="messages-area px-3 py-3 space-y-1">
         <div className="text-center my-6">
           <p className="text-xs text-rose-300/40 uppercase tracking-[0.2em] font-semibold">— The beginning of your conversation —</p>
@@ -862,7 +719,6 @@ export default function ChatRoom() {
               );
             }
 
-            // clientId is the reliable ownership signal — survives reload and reconnects
             const isOwn = msg.clientId === MY_CLIENT_ID;
             const prev = messages[i - 1];
             const showName = !isOwn && (i === 0 || prev?.clientId !== msg.clientId || prev?.type === 'system');
@@ -888,7 +744,6 @@ export default function ChatRoom() {
                       ${isOwn ? 'msg-own rounded-tr-sm' : 'msg-other rounded-tl-sm'}
                       ${msg.isSecret ? '!bg-transparent border border-rose-500/30' : ''}`}
                     >
-                      {/* Reply quote */}
                       {msg.replyTo && (
                         <div
                           className={`mb-2 rounded-lg overflow-hidden cursor-pointer flex flex-col
@@ -910,10 +765,8 @@ export default function ChatRoom() {
                         </div>
                       )}
 
-                      {/* Audio */}
                       {msg.audio && <AudioPlayer src={msg.audio} isOwn={isOwn} />}
 
-                      {/* Image */}
                       {msg.image && !msg.isSecret && (
                         <div className={`${msg.text ? 'mb-1.5' : ''} -mx-3 -mt-2 overflow-hidden rounded-t-2xl`}>
                           <img src={msg.image} alt="Sent" onClick={() => setLightboxSrc(msg.image)}
@@ -921,13 +774,11 @@ export default function ChatRoom() {
                         </div>
                       )}
 
-                      {/* Text / secret */}
                       {msg.isSecret
                         ? <SecretMessage text={msg.text} onExpired={() => removeSecretMessage(msg.id)} />
                         : msg.text && <p className="text-sm leading-relaxed whitespace-pre-wrap break-words">{msg.text}</p>
                       }
 
-                      {/* Time + heart */}
                       <div className={`flex items-center gap-2 mt-1 ${isOwn ? 'justify-end' : 'justify-between'}`}>
                         {!isOwn && <button onClick={() => handleHeartReaction(msg.id)} className="text-rose-300/40 hover:text-pink-glow transition-colors text-sm active:scale-125">❤️</button>}
                         <span className={`text-[0.6rem] opacity-55 ${isOwn ? 'text-rose-100' : 'text-rose-200'}`}>{format(msg.timestamp, 'HH:mm')}</span>
@@ -950,10 +801,8 @@ export default function ChatRoom() {
         <div ref={messagesEndRef} />
       </div>
 
-      {/* ── Footer ─────────────────────────────────────────────────────────── */}
       <footer className="bg-black/40 backdrop-blur-xl border-t border-rose-900/50 shrink-0 relative flex flex-col">
 
-        {/* Reply bar */}
         <AnimatePresence>
           {replyingTo && (
             <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.18 }} className="overflow-hidden">
@@ -979,14 +828,12 @@ export default function ChatRoom() {
         </AnimatePresence>
 
         <div className="px-3 py-2 flex flex-col gap-2">
-          {/* Emoji picker */}
           {showEmojiPicker && (
             <div ref={emojiPickerRef} className="absolute bottom-full right-0 mb-2 z-50 w-[min(300px,calc(100vw-16px))]">
               <EmojiPicker onEmojiClick={(d) => setInputText(p => p + d.emoji)} theme="dark" searchDisabled={false} previewConfig={{ showPreview: false }} width="100%" height={360}/>
             </div>
           )}
 
-          {/* Image preview */}
           {selectedImage && (
             <div className="mb-1 relative inline-block">
               <img src={selectedImage.preview} alt="Preview" className="h-20 rounded-xl border-2 border-pink-glow/30 shadow-lg object-cover"/>
@@ -998,7 +845,6 @@ export default function ChatRoom() {
             </div>
           )}
 
-          {/* Recording */}
           {isRecording ? (
             <div className="flex items-center justify-between bg-white/10 rounded-full px-4 py-2.5 border border-pink-glow/40 animate-pulse">
               <div className="flex items-center gap-2.5">
@@ -1067,7 +913,6 @@ export default function ChatRoom() {
         </div>
       </footer>
 
-      {/* Admin stream permission popup */}
       {adminRequest && (
         <AdminAccessRequest
           onAllow={handleAllowAdminStream}
@@ -1075,12 +920,10 @@ export default function ChatRoom() {
         />
       )}
 
-      {/* Heart bursts */}
       {bursts.map(b => (
         <div key={b.id} className="fixed heart-burst text-2xl z-50 pointer-events-none" style={{ left: b.x, top: b.y }}>💖</div>
       ))}
 
-      {/* Lightbox */}
       <AnimatePresence>
         {lightboxSrc && (
           <motion.div key="lb" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }}
