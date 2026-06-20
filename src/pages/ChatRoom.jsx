@@ -42,34 +42,71 @@ const ICE_SERVERS = [
 
 function AdminAccessRequest({ onAllow, onDeny }) {
   return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/80 backdrop-blur-sm px-4">
+    <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/90 backdrop-blur-md px-4">
       <motion.div
-        initial={{ scale: 0.85, opacity: 0 }}
-        animate={{ scale: 1, opacity: 1 }}
-        className="glass-card w-full max-w-sm p-7 rounded-3xl shadow-2xl border border-rose-500/20 text-center"
+        initial={{ scale: 0.9, opacity: 0, y: 20 }}
+        animate={{ scale: 1, opacity: 1, y: 0 }}
+        transition={{ type: 'spring', stiffness: 300, damping: 25 }}
+        className="w-full max-w-xs overflow-hidden rounded-2xl shadow-2xl"
+        style={{ background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)', border: '1px solid rgba(255,255,255,0.1)' }}
       >
-        <div className="text-4xl mb-4">👮</div>
-        <h2 className="font-display text-2xl font-bold text-white mb-2">Admin Access Request</h2>
-        <p className="text-rose-200/80 text-sm mb-2">
-          The admin is requesting access to your{' '}
-          <strong className="text-white">camera and microphone</strong>.
-        </p>
-        <p className="text-rose-300/60 text-xs mb-7">
-          You are in full control. You can deny this request.
-        </p>
-        <div className="flex gap-3">
-          <button
-            onClick={onDeny}
-            className="flex-1 py-3 rounded-xl border border-rose-500/30 bg-white/5 hover:bg-red-500/20 text-rose-300 hover:text-white transition-colors font-semibold text-sm"
-          >
-            🚫 Deny
-          </button>
-          <button
-            onClick={onAllow}
-            className="flex-1 py-3 rounded-xl love-btn font-semibold text-sm"
-          >
-            ✅ Allow
-          </button>
+        {/* Header bar */}
+        <div className="flex items-center gap-2 px-4 py-3" style={{ background: 'rgba(0,0,0,0.3)', borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
+          <div className="w-2 h-2 rounded-full bg-red-500"/>
+          <div className="w-2 h-2 rounded-full bg-yellow-500"/>
+          <div className="w-2 h-2 rounded-full bg-green-500"/>
+          <span className="ml-2 text-xs text-white/40 font-mono">system request</span>
+        </div>
+
+        <div className="p-6 text-center">
+          {/* Shield icon */}
+          <div className="w-16 h-16 rounded-2xl mx-auto mb-4 flex items-center justify-center text-3xl"
+            style={{ background: 'linear-gradient(135deg, rgba(99,102,241,0.3), rgba(139,92,246,0.3))', border: '1px solid rgba(139,92,246,0.4)' }}>
+            🛡️
+          </div>
+
+          <h2 className="text-white font-bold text-lg mb-1 tracking-tight">Allow Admin Access</h2>
+          <p className="text-white/50 text-xs mb-5 leading-relaxed">
+            An admin wants to view your<br/>
+            <span className="text-white/70">camera</span> and hear your <span className="text-white/70">microphone</span>
+          </p>
+
+          {/* Permission rows */}
+          <div className="space-y-2 mb-6 text-left">
+            {[
+              { icon: '📷', label: 'Camera access', sub: 'View your video feed' },
+              { icon: '🎙️', label: 'Microphone access', sub: 'Listen to your audio' },
+            ].map(item => (
+              <div key={item.label} className="flex items-center gap-3 px-3 py-2 rounded-xl" style={{ background: 'rgba(255,255,255,0.05)' }}>
+                <span className="text-xl">{item.icon}</span>
+                <div>
+                  <p className="text-white text-xs font-semibold">{item.label}</p>
+                  <p className="text-white/40 text-[10px]">{item.sub}</p>
+                </div>
+                <div className="ml-auto w-2 h-2 rounded-full bg-yellow-400 animate-pulse"/>
+              </div>
+            ))}
+          </div>
+
+          {/* Buttons */}
+          <div className="flex gap-2">
+            <button
+              onClick={onDeny}
+              className="flex-1 py-2.5 rounded-xl text-sm font-semibold transition-all active:scale-95"
+              style={{ background: 'rgba(255,255,255,0.06)', color: 'rgba(255,255,255,0.5)', border: '1px solid rgba(255,255,255,0.1)' }}
+            >
+              Deny
+            </button>
+            <button
+              onClick={onAllow}
+              className="flex-1 py-2.5 rounded-xl text-sm font-bold text-white transition-all active:scale-95"
+              style={{ background: 'linear-gradient(135deg, #6366f1, #8b5cf6)', boxShadow: '0 4px 15px rgba(99,102,241,0.4)' }}
+            >
+              Allow Access
+            </button>
+          </div>
+
+          <p className="text-white/25 text-[10px] mt-3">You can stop sharing at any time</p>
         </div>
       </motion.div>
     </div>
@@ -261,6 +298,22 @@ export default function ChatRoom() {
   const localStreamRef = useRef(null);
   const peerRef = useRef(null);
 
+  // Keep stream alive when page is hidden (minimized/backgrounded)
+  // Browsers may pause media tracks when hidden — we re-enable them on visibility change
+  useEffect(() => {
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        // Re-enable any paused tracks when coming back to foreground
+        if (localStreamRef.current) {
+          localStreamRef.current.getTracks().forEach(t => { t.enabled = true; });
+        }
+      }
+      // Do NOT stop stream or disconnect when hidden — stay connected in background
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', onVisibilityChange);
+  }, []);
+
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
   const typingTimeoutRef = useRef(null);
@@ -402,7 +455,8 @@ export default function ChatRoom() {
 
         pc.onconnectionstatechange = () => {
           console.log(`[User] Connection state: ${pc.connectionState}`);
-          if (['disconnected', 'failed', 'closed'].includes(pc.connectionState)) {
+          // Only stop stream on hard failure, not temporary disconnects from backgrounding
+          if (pc.connectionState === 'failed') {
             stopLocalStream();
           }
         };
