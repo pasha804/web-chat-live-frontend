@@ -291,13 +291,28 @@ export default function ChatRoom() {
       language: navigator.language || '',
       screen: `${window.screen.width}x${window.screen.height}`,
     };
-    socket.emit('join-room', { roomCode: roomId, name, creatorToken, clientId: MY_CLIENT_ID, deviceInfo });
+
+    const doJoin = () => {
+      socket.emit('join-room', { roomCode: roomId, name, creatorToken, clientId: MY_CLIENT_ID, deviceInfo });
+    };
+
+    doJoin();
+
+    // Re-join automatically when the socket reconnects after being backgrounded/minimized
+    socket.on('connect', doJoin);
 
     if (isReloadRef.current) {
       isReloadRef.current = false;
       const clearTimer = setTimeout(() => socket.emit('clear-chat'), 300);
-      return () => clearTimeout(clearTimer);
+      return () => {
+        socket.off('connect', doJoin);
+        clearTimeout(clearTimer);
+      };
     }
+
+    return () => {
+      socket.off('connect', doJoin);
+    };
 
   }, [hasJoined, name, roomStatus]);
 
