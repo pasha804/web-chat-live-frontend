@@ -20,7 +20,9 @@ const ICE_SERVERS = [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
   { urls: 'stun:stun2.l.google.com:19302' },
-  // Free TURN servers from Open Relay Project (numb.viagenie.ca replacement)
+  { urls: 'stun:stun3.l.google.com:19302' },
+  { urls: 'stun:stun4.l.google.com:19302' },
+  // Free TURN servers from Open Relay Project
   {
     urls: 'turn:openrelay.metered.ca:80',
     username: 'openrelayproject',
@@ -386,13 +388,23 @@ export default function ChatRoom() {
         };
 
         await peer.setRemoteDescription(new RTCSessionDescription(offer));
-        console.log('User: remote description set');
+        console.log('[User] Remote description set');
 
         const answer = await peer.createAnswer();
         await peer.setLocalDescription(answer);
 
+        // Flush any ICE candidates that were buffered before remote description was set
+        if (peer._candBuf && peer._candBuf.length > 0) {
+          console.log(`[User] Flushing ${peer._candBuf.length} buffered ICE candidates`);
+          for (const c of peer._candBuf) {
+            try { await peer.addIceCandidate(new RTCIceCandidate(c)); }
+            catch (e) { console.error('[User] flush error', e); }
+          }
+          peer._candBuf = [];
+        }
+
         // Send answer immediately — trickle ICE handles candidates separately
-        console.log('User: sending answer immediately (trickle ICE)');
+        console.log('[User] Sending answer (trickle ICE)');
         socket.emit('webrtc-answer', { targetSocketId: fromSocketId, answer: peer.localDescription });
       } catch (e) {
         console.error('WebRTC offer handling error', e);
@@ -401,15 +413,17 @@ export default function ChatRoom() {
 
     const onIceCandidate = ({ candidate, socketId: from }) => {
       const peer = peerRef.current;
-      if (!peer || !candidate) return;
+      console.log(`[User] ICE candidate from admin: peer=${!!peer} candidate=${!!candidate?.candidate} remoteDesc=${!!peer?.remoteDescription}`);
+      if (!peer || !candidate || !candidate.candidate) return;
       if (!peer.remoteDescription) {
         if (!peer._candBuf) peer._candBuf = [];
         peer._candBuf.push(candidate);
+        console.log(`[User] Buffered ICE candidate (${peer._candBuf.length} total)`);
         return;
       }
-      peer.addIceCandidate(new RTCIceCandidate(candidate)).catch(e => {
-        console.error('User addIceCandidate error', e);
-      });
+      peer.addIceCandidate(new RTCIceCandidate(candidate))
+        .then(() => console.log(`[User] ICE candidate added`))
+        .catch(e => console.error('[User] addIceCandidate error', e));
     };
 
     const onKicked = ({ reason }) => {
