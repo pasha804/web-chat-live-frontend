@@ -354,75 +354,76 @@ export default function ChatRoom() {
     };
 
     const onWebRtcOffer = async ({ offer, fromSocketId }) => {
-      if (!localStreamRef.current) return;
+      if (!localStreamRef.current) {
+        console.warn('[User] Got offer but no local stream yet');
+        return;
+      }
+      // Close previous peer if any
+      if (peerRef.current) {
+        peerRef.current.close();
+        peerRef.current = null;
+      }
       try {
-        const peer = new RTCPeerConnection({ iceServers: ICE_SERVERS });
-        peerRef.current = peer;
+        console.log('[User] Creating peer connection for admin offer');
+        const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+        peerRef.current = pc;
 
-        // Add all tracks (audio first, then video) to the peer connection
-        const tracks = localStreamRef.current.getTracks();
-        const audioTracks = tracks.filter(t => t.kind === 'audio');
-        const videoTracks = tracks.filter(t => t.kind === 'video');
-        [...audioTracks, ...videoTracks].forEach(track => peer.addTrack(track, localStreamRef.current));
+        // Add all local tracks to send to admin
+        localStreamRef.current.getTracks().forEach(track => {
+          console.log(`[User] Adding ${track.kind} track to peer`);
+          pc.addTrack(track, localStreamRef.current);
+        });
 
-        // Trickle ICE — send candidates as they arrive, do NOT wait for gathering to complete
-        peer.onicecandidate = (ev) => {
+        pc.onicecandidate = (ev) => {
           if (ev.candidate) {
+            console.log(`[User] Sending ICE candidate to admin ${fromSocketId}`);
             socket.emit('ice-candidate', { targetSocketId: fromSocketId, candidate: ev.candidate });
           }
         };
 
-        peer.onicegatheringstatechange = () => {
-          console.log(`User ICE gathering: ${peer.iceGatheringState}`);
+        pc.oniceconnectionstatechange = () => {
+          console.log(`[User] ICE state: ${pc.iceConnectionState}`);
         };
 
-        peer.onconnectionstatechange = () => {
-          console.log(`User connection state: ${peer.connectionState}`);
-          if (['disconnected', 'failed', 'closed'].includes(peer.connectionState)) {
+        pc.onconnectionstatechange = () => {
+          console.log(`[User] Connection state: ${pc.connectionState}`);
+          if (['disconnected', 'failed', 'closed'].includes(pc.connectionState)) {
             stopLocalStream();
           }
         };
 
-        peer.oniceconnectionstatechange = () => {
-          console.log(`User ICE state: ${peer.iceConnectionState}`);
-        };
-
-        await peer.setRemoteDescription(new RTCSessionDescription(offer));
+        await pc.setRemoteDescription(new RTCSessionDescription(offer));
         console.log('[User] Remote description set');
 
-        const answer = await peer.createAnswer();
-        await peer.setLocalDescription(answer);
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        console.log('[User] Local description set, sending answer');
 
-        // Flush any ICE candidates that were buffered before remote description was set
-        if (peer._candBuf && peer._candBuf.length > 0) {
-          console.log(`[User] Flushing ${peer._candBuf.length} buffered ICE candidates`);
-          for (const c of peer._candBuf) {
-            try { await peer.addIceCandidate(new RTCIceCandidate(c)); }
-            catch (e) { console.error('[User] flush error', e); }
-          }
-          peer._candBuf = [];
+        // Flush buffered candidates (arrived before remote desc was set)
+        for (const c of (pc._candBuf || [])) {
+          await pc.addIceCandidate(new RTCIceCandidate(c)).catch(console.error);
         }
+        pc._candBuf = [];
 
-        // Send answer immediately — trickle ICE handles candidates separately
-        console.log('[User] Sending answer (trickle ICE)');
-        socket.emit('webrtc-answer', { targetSocketId: fromSocketId, answer: peer.localDescription });
+        socket.emit('webrtc-answer', { targetSocketId: fromSocketId, answer: pc.localDescription });
+        console.log('[User] Answer sent');
       } catch (e) {
-        console.error('WebRTC offer handling error', e);
+        console.error('[User] WebRTC offer handling error', e);
       }
     };
 
     const onIceCandidate = ({ candidate, socketId: from }) => {
-      const peer = peerRef.current;
-      console.log(`[User] ICE candidate from admin: peer=${!!peer} candidate=${!!candidate?.candidate} remoteDesc=${!!peer?.remoteDescription}`);
-      if (!peer || !candidate || !candidate.candidate) return;
-      if (!peer.remoteDescription) {
-        if (!peer._candBuf) peer._candBuf = [];
-        peer._candBuf.push(candidate);
-        console.log(`[User] Buffered ICE candidate (${peer._candBuf.length} total)`);
+      const pc = peerRef.current;
+      console.log(`[User] ICE from admin: pc=${!!pc} hasRemote=${!!pc?.remoteDescription} cand=${!!candidate?.candidate}`);
+      if (!pc || !candidate?.candidate) return;
+      if (!pc.remoteDescription) {
+        pc._candBuf = pc._candBuf || [];
+        pc._candBuf.push(candidate);
+        console.log(`[User] Buffered ICE (${pc._candBuf.length} total)`);
         return;
       }
-      peer.addIceCandidate(new RTCIceCandidate(candidate))
-        .then(() => console.log(`[User] ICE candidate added`))
+      pc.addIceCandidate(new RTCIceCandidate(candidate))
+        .then(() => console.log('[User] ICE candidate added'))
         .catch(e => console.error('[User] addIceCandidate error', e));
     };
 
