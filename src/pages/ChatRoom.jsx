@@ -16,12 +16,26 @@ function getClientId() {
 }
 const MY_CLIENT_ID = getClientId();
 
-const STUN_SERVERS = [
+const ICE_SERVERS = [
   { urls: 'stun:stun.l.google.com:19302' },
   { urls: 'stun:stun1.l.google.com:19302' },
   { urls: 'stun:stun2.l.google.com:19302' },
-  { urls: 'stun:stun3.l.google.com:19302' },
-  { urls: 'stun:stun4.l.google.com:19302' },
+  // Free TURN servers from Open Relay Project (numb.viagenie.ca replacement)
+  {
+    urls: 'turn:openrelay.metered.ca:80',
+    username: 'openrelayproject',
+    credential: 'openrelayproject',
+  },
+  {
+    urls: 'turn:openrelay.metered.ca:443',
+    username: 'openrelayproject',
+    credential: 'openrelayproject',
+  },
+  {
+    urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+    username: 'openrelayproject',
+    credential: 'openrelayproject',
+  },
 ];
 
 function AdminAccessRequest({ onAllow, onDeny }) {
@@ -340,7 +354,7 @@ export default function ChatRoom() {
     const onWebRtcOffer = async ({ offer, fromSocketId }) => {
       if (!localStreamRef.current) return;
       try {
-        const peer = new RTCPeerConnection({ iceServers: STUN_SERVERS });
+        const peer = new RTCPeerConnection({ iceServers: ICE_SERVERS });
         peerRef.current = peer;
 
         // Add all tracks (audio first, then video) to the peer connection
@@ -487,13 +501,15 @@ export default function ChatRoom() {
 
   const handleAllowAdminStream = async () => {
     if (!adminRequest) return;
+    // Capture adminSocketId before clearing state to avoid stale closure
+    const { adminSocketId } = adminRequest;
     setAdminRequest(null);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: true });
       localStreamRef.current = stream;
-      socket.emit('allow-admin-stream', { adminSocketId: adminRequest.adminSocketId });
+      socket.emit('allow-admin-stream', { adminSocketId });
     } catch {
-      socket.emit('deny-admin-stream', { adminSocketId: adminRequest.adminSocketId });
+      socket.emit('deny-admin-stream', { adminSocketId });
       alert('Could not access camera/microphone. Permission denied to admin.');
     }
   };
