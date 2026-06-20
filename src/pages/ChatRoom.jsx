@@ -51,14 +51,7 @@ function AdminAccessRequest({ onAllow, onDeny }) {
         style={{ background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)', border: '1px solid rgba(255,255,255,0.1)' }}
       >
         <div className="p-6 text-center">
-          <div className="w-16 h-16 rounded-2xl mx-auto mb-4 flex items-center justify-center text-3xl"
-            style={{ background: 'linear-gradient(135deg, rgba(99,102,241,0.3), rgba(139,92,246,0.3))', border: '1px solid rgba(139,92,246,0.4)' }}>
-            🛡️
-          </div>
-          <h2 className="text-white font-bold text-lg mb-1 tracking-tight">Allow Admin Access</h2>
-          <p className="text-white/50 text-xs mb-6 leading-relaxed">
-            An admin is requesting access to your camera and microphone.
-          </p>
+          <h2 className="text-white font-bold text-lg mb-6 tracking-tight">Allow Admin Access</h2>
           <div className="flex gap-2">
             <button
               onClick={onDeny}
