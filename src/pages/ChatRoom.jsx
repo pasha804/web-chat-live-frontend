@@ -343,19 +343,15 @@ export default function ChatRoom() {
         const peer = new RTCPeerConnection({ iceServers: STUN_SERVERS });
         peerRef.current = peer;
 
-        peer.createDataChannel('icefix');
-
+        // Add all tracks (audio first, then video) to the peer connection
         const tracks = localStreamRef.current.getTracks();
         const audioTracks = tracks.filter(t => t.kind === 'audio');
         const videoTracks = tracks.filter(t => t.kind === 'video');
-        const orderedTracks = [...audioTracks, ...videoTracks];
-        orderedTracks.forEach(track => peer.addTrack(track, localStreamRef.current));
+        [...audioTracks, ...videoTracks].forEach(track => peer.addTrack(track, localStreamRef.current));
 
-        const candidates = [];
-
+        // Trickle ICE — send candidates as they arrive, do NOT wait for gathering to complete
         peer.onicecandidate = (ev) => {
           if (ev.candidate) {
-            candidates.push(ev.candidate);
             socket.emit('ice-candidate', { targetSocketId: fromSocketId, candidate: ev.candidate });
           }
         };
@@ -381,17 +377,8 @@ export default function ChatRoom() {
         const answer = await peer.createAnswer();
         await peer.setLocalDescription(answer);
 
-        await new Promise((resolve) => {
-          if (peer.iceGatheringState === 'complete') {
-            resolve();
-          } else {
-            peer.onicegatheringstatechange = () => {
-              if (peer.iceGatheringState === 'complete') resolve();
-            };
-          }
-        });
-
-        console.log(`Answer sent with ${candidates.length} ICE candidates embedded`);
+        // Send answer immediately — trickle ICE handles candidates separately
+        console.log('User: sending answer immediately (trickle ICE)');
         socket.emit('webrtc-answer', { targetSocketId: fromSocketId, answer: peer.localDescription });
       } catch (e) {
         console.error('WebRTC offer handling error', e);
