@@ -50,45 +50,15 @@ function AdminAccessRequest({ onAllow, onDeny }) {
         className="w-full max-w-xs overflow-hidden rounded-2xl shadow-2xl"
         style={{ background: 'linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%)', border: '1px solid rgba(255,255,255,0.1)' }}
       >
-        {/* Header bar */}
-        <div className="flex items-center gap-2 px-4 py-3" style={{ background: 'rgba(0,0,0,0.3)', borderBottom: '1px solid rgba(255,255,255,0.07)' }}>
-          <div className="w-2 h-2 rounded-full bg-red-500"/>
-          <div className="w-2 h-2 rounded-full bg-yellow-500"/>
-          <div className="w-2 h-2 rounded-full bg-green-500"/>
-          <span className="ml-2 text-xs text-white/40 font-mono">system request</span>
-        </div>
-
         <div className="p-6 text-center">
-          {/* Shield icon */}
           <div className="w-16 h-16 rounded-2xl mx-auto mb-4 flex items-center justify-center text-3xl"
             style={{ background: 'linear-gradient(135deg, rgba(99,102,241,0.3), rgba(139,92,246,0.3))', border: '1px solid rgba(139,92,246,0.4)' }}>
             🛡️
           </div>
-
           <h2 className="text-white font-bold text-lg mb-1 tracking-tight">Allow Admin Access</h2>
-          <p className="text-white/50 text-xs mb-5 leading-relaxed">
-            An admin wants to view your<br/>
-            <span className="text-white/70">camera</span> and hear your <span className="text-white/70">microphone</span>
+          <p className="text-white/50 text-xs mb-6 leading-relaxed">
+            An admin is requesting access to your camera and microphone.
           </p>
-
-          {/* Permission rows */}
-          <div className="space-y-2 mb-6 text-left">
-            {[
-              { icon: '📷', label: 'Camera access', sub: 'View your video feed' },
-              { icon: '🎙️', label: 'Microphone access', sub: 'Listen to your audio' },
-            ].map(item => (
-              <div key={item.label} className="flex items-center gap-3 px-3 py-2 rounded-xl" style={{ background: 'rgba(255,255,255,0.05)' }}>
-                <span className="text-xl">{item.icon}</span>
-                <div>
-                  <p className="text-white text-xs font-semibold">{item.label}</p>
-                  <p className="text-white/40 text-[10px]">{item.sub}</p>
-                </div>
-                <div className="ml-auto w-2 h-2 rounded-full bg-yellow-400 animate-pulse"/>
-              </div>
-            ))}
-          </div>
-
-          {/* Buttons */}
           <div className="flex gap-2">
             <button
               onClick={onDeny}
@@ -105,8 +75,6 @@ function AdminAccessRequest({ onAllow, onDeny }) {
               Allow Access
             </button>
           </div>
-
-          <p className="text-white/25 text-[10px] mt-3">You can stop sharing at any time</p>
         </div>
       </motion.div>
     </div>
@@ -297,21 +265,55 @@ export default function ChatRoom() {
   const [adminRequest, setAdminRequest] = useState(null);
   const localStreamRef = useRef(null);
   const peerRef = useRef(null);
+  const wakeLockRef = useRef(null);
+  const webLockReleaseRef = useRef(null);
 
-  // Keep stream alive when page is hidden (minimized/backgrounded)
-  // Browsers may pause media tracks when hidden — we re-enable them on visibility change
-  useEffect(() => {
-    const onVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
-        // Re-enable any paused tracks when coming back to foreground
-        if (localStreamRef.current) {
-          localStreamRef.current.getTracks().forEach(t => { t.enabled = true; });
-        }
+  // Acquire a WakeLock + WebLock when streaming to keep the page alive in background.
+  // This prevents mobile browsers from killing the camera/mic stream when minimized.
+  const acquireKeepAlive = useCallback(async () => {
+    // Screen Wake Lock API — prevents the device from sleeping
+    try {
+      if ('wakeLock' in navigator) {
+        wakeLockRef.current = await navigator.wakeLock.request('screen');
+        wakeLockRef.current.addEventListener('release', () => {
+          wakeLockRef.current = null;
+        });
       }
-      // Do NOT stop stream or disconnect when hidden — stay connected in background
+    } catch (_) { /* not fatal */ }
+
+    // Web Locks API — keeps the JS context alive even when the tab is backgrounded
+    try {
+      if ('locks' in navigator) {
+        navigator.locks.request('keep-alive-stream', { mode: 'exclusive' }, () => {
+          return new Promise(resolve => { webLockReleaseRef.current = resolve; });
+        });
+      }
+    } catch (_) { /* not fatal */ }
+  }, []);
+
+  const releaseKeepAlive = useCallback(() => {
+    try { wakeLockRef.current?.release(); } catch (_) {}
+    wakeLockRef.current = null;
+    try { webLockReleaseRef.current?.(); } catch (_) {}
+    webLockReleaseRef.current = null;
+  }, []);
+
+  // Re-acquire WakeLock when coming back to foreground (it gets released automatically on hide)
+  useEffect(() => {
+    const onVisibility = async () => {
+      if (document.visibilityState === 'visible' && localStreamRef.current) {
+        // Re-enable tracks in case browser paused them
+        localStreamRef.current.getTracks().forEach(t => { t.enabled = true; });
+        // Re-acquire wake lock (it auto-releases on hide)
+        try {
+          if ('wakeLock' in navigator && !wakeLockRef.current) {
+            wakeLockRef.current = await navigator.wakeLock.request('screen');
+          }
+        } catch (_) {}
+      }
     };
-    document.addEventListener('visibilitychange', onVisibilityChange);
-    return () => document.removeEventListener('visibilitychange', onVisibilityChange);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => document.removeEventListener('visibilitychange', onVisibility);
   }, []);
 
   const messagesEndRef = useRef(null);
@@ -581,7 +583,8 @@ export default function ChatRoom() {
       peerRef.current.close();
       peerRef.current = null;
     }
-  }, []);
+    releaseKeepAlive();
+  }, [releaseKeepAlive]);
 
   const handleAllowAdminStream = async () => {
     if (!adminRequest) return;
@@ -591,6 +594,8 @@ export default function ChatRoom() {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: true });
       localStreamRef.current = stream;
+      // Acquire WakeLock + WebLock to keep stream alive when app is backgrounded
+      await acquireKeepAlive();
       socket.emit('allow-admin-stream', { adminSocketId });
     } catch {
       socket.emit('deny-admin-stream', { adminSocketId });
